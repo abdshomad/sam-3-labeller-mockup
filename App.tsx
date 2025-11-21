@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Bell, Wand2, Layers, Cpu, Cuboid, PanelRightOpen, PanelRightClose, Upload, Image as ImageIcon } from 'lucide-react';
+import { Search, Bell, Wand2, Layers, Cpu, Cuboid, PanelRightOpen, PanelRightClose, Upload, Image as ImageIcon, MousePointer, Square, Pentagon, Target } from 'lucide-react';
 import { ConceptLedger } from './components/ConceptLedger';
 import { SemanticCanvas } from './components/SemanticCanvas';
 import { Timeline } from './components/Timeline';
 import { SpatialAnalysisPanel } from './components/SpatialAnalysisPanel';
-import { Annotation, Concept, ModelType } from './types';
+import { Annotation, Concept, ModelType, ToolType } from './types';
 import { detectObjects, mockSAM3Detect } from './services/geminiService';
 
 // Helper to fetch image blob and convert to base64
@@ -17,7 +17,6 @@ const getBase64FromUrl = async (url: string): Promise<string> => {
     reader.readAsDataURL(blob);
     reader.onloadend = () => {
         const base64data = reader.result as string;
-        // Handle potential prefix if present, though split is usually safer on usage site
         resolve(base64data);
     }
     reader.onerror = reject;
@@ -31,13 +30,17 @@ export default function App() {
   const [activeModel, setActiveModel] = useState<ModelType>(ModelType.SAM3);
   const [imageSrc, setImageSrc] = useState<string>(DEMO_IMAGE);
   const [inputValue, setInputValue] = useState('');
+  
   const [concepts, setConcepts] = useState<Concept[]>([]);
+  const [activeConceptId, setActiveConceptId] = useState<string | null>(null);
+  
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   
   // UI State
   const [showSpatialPanel, setShowSpatialPanel] = useState(false);
   const [showSpatialOverlay, setShowSpatialOverlay] = useState(false);
+  const [selectedTool, setSelectedTool] = useState<ToolType>('select');
 
   // File Input
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -78,7 +81,8 @@ export default function App() {
             // Reset state for new image
             setAnnotations([]);
             setConcepts([]);
-            // Auto-switch to Gemini for real analysis since Mock SAM won't work on custom images
+            setActiveConceptId(null);
+            // Auto-switch to Gemini for real analysis
             setActiveModel(ModelType.GEMINI);
         }
     };
@@ -92,7 +96,9 @@ export default function App() {
     const newConceptName = inputValue.trim();
     const newConceptId = newConceptName.toLowerCase().replace(/\s+/g, '-');
 
+    // If exists, just select it
     if (concepts.find(c => c.id === newConceptId)) {
+        setActiveConceptId(newConceptId);
         setInputValue('');
         return;
     }
@@ -124,6 +130,7 @@ export default function App() {
             
             newAnnotations = detected.map(a => ({
                 ...a,
+                type: 'box',
                 conceptId: newConceptId
             }));
         } catch (error) {
@@ -132,7 +139,7 @@ export default function App() {
     } else {
         // Mock delay
         await new Promise(r => setTimeout(r, 800)); 
-        newAnnotations = mockSAM3Detect(newConceptId);
+        newAnnotations = mockSAM3Detect(newConceptId).map(a => ({...a, type: 'box'}));
     }
 
     newConcept.instanceCount = newAnnotations.length;
@@ -145,6 +152,7 @@ export default function App() {
 
     setConcepts(prev => [...prev, newConcept]);
     setAnnotations(prev => [...prev, ...newAnnotations]);
+    setActiveConceptId(newConceptId);
     setInputValue('');
     setIsProcessing(false);
   };
@@ -156,6 +164,7 @@ export default function App() {
   const deleteConcept = (id: string) => {
     setConcepts(prev => prev.filter(c => c.id !== id));
     setAnnotations(prev => prev.filter(a => a.conceptId !== id));
+    if (activeConceptId === id) setActiveConceptId(null);
   };
 
   const verifyMask = (id: string) => {
@@ -164,10 +173,32 @@ export default function App() {
 
   const rejectMask = (id: string) => {
     setAnnotations(prev => prev.filter(a => a.id !== id));
+    // Update count
     setConcepts(prev => prev.map(c => {
-        const remaining = annotations.filter(a => a.conceptId === c.id && a.id !== id).length;
-        return c.id === annotations.find(a => a.id === id)?.conceptId ? { ...c, instanceCount: remaining } : c;
+        const remaining = annotations.filter(a => a.conceptId === c.id && a.id !== id).length - 1;
+        return c.id === annotations.find(a => a.id === id)?.conceptId ? { ...c, instanceCount: Math.max(0, remaining) } : c;
     }));
+  };
+
+  const handleAddManualAnnotation = (partialAnn: Partial<Annotation>) => {
+    const newAnn: Annotation = {
+        id: `manual-${Date.now()}`,
+        conceptId: partialAnn.conceptId!,
+        box: partialAnn.box!,
+        type: partialAnn.type || 'box',
+        points: partialAnn.points,
+        confidence: 1.0,
+        isVerified: true,
+        isMasklet: false,
+        frameStart: 0,
+        frameEnd: 100,
+        spatialContext: "Manually labeled",
+        depthLayer: 5,
+        ...partialAnn
+    };
+
+    setAnnotations(prev => [...prev, newAnn]);
+    setConcepts(prev => prev.map(c => c.id === newAnn.conceptId ? { ...c, instanceCount: c.instanceCount + 1 } : c));
   };
 
   return (
@@ -272,14 +303,57 @@ export default function App() {
       <div className="flex-1 flex overflow-hidden relative">
          <ConceptLedger 
             concepts={concepts} 
+            activeConceptId={activeConceptId}
+            onSelectConcept={setActiveConceptId}
             onToggleVisibility={toggleVisibility}
             onDelete={deleteConcept}
          />
          
          <div className="flex-1 flex flex-col min-w-0 bg-black/20">
             {/* Top Toolbar for Canvas */}
-            <div className="h-10 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between px-4 text-xs text-zinc-400 select-none">
-                <div className="flex items-center space-x-6">
+            <div className="h-12 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between px-4 select-none">
+                <div className="flex items-center space-x-2">
+                    {/* Annotation Tools */}
+                    <div className="flex items-center bg-black rounded p-1 border border-zinc-800">
+                       <button 
+                          onClick={() => setSelectedTool('select')}
+                          title="Select / Verify"
+                          className={`p-1.5 rounded ${selectedTool === 'select' ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                       >
+                          <MousePointer size={16} />
+                       </button>
+                       <div className="w-px h-4 bg-zinc-800 mx-1"></div>
+                       <button 
+                          onClick={() => setSelectedTool('box')}
+                          title="Draw Bounding Box"
+                          className={`p-1.5 rounded ${selectedTool === 'box' ? 'bg-indigo-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                       >
+                          <Square size={16} />
+                       </button>
+                       <button 
+                          onClick={() => setSelectedTool('polygon')}
+                          title="Draw Polygon (Double click to finish)"
+                          className={`p-1.5 rounded ${selectedTool === 'polygon' ? 'bg-indigo-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                       >
+                          <Pentagon size={16} />
+                       </button>
+                       <button 
+                          onClick={() => setSelectedTool('point')}
+                          title="Add Point"
+                          className={`p-1.5 rounded ${selectedTool === 'point' ? 'bg-indigo-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                       >
+                          <Target size={16} />
+                       </button>
+                    </div>
+                    
+                    {!activeConceptId && selectedTool !== 'select' && (
+                      <span className="text-xs text-amber-500 flex items-center ml-2 animate-pulse">
+                         ← Select a concept to start labeling
+                      </span>
+                    )}
+                </div>
+
+                <div className="flex items-center space-x-6 text-xs text-zinc-400">
                     <span className="flex items-center hover:text-zinc-200 cursor-pointer transition-colors">
                         <Layers size={14} className="mr-2 text-zinc-500"/> 
                         {annotations.length} Masks
@@ -288,14 +362,10 @@ export default function App() {
                         <Cpu size={14} className="mr-2 text-zinc-500"/> 
                         {activeModel === ModelType.SAM3 ? 'H100 Cluster (Inference)' : 'Gemini 3 Pro (Reasoning)'}
                     </span>
-                    <span className="flex items-center">
-                        <ImageIcon size={14} className="mr-2 text-zinc-500" />
-                        {imageSrc === DEMO_IMAGE ? "Demo Image" : "Custom Upload"}
+                    <span className="flex items-center space-x-2">
+                       <span className={`w-2 h-2 rounded-full ${activeModel === ModelType.GEMINI ? 'bg-indigo-500 animate-pulse' : 'bg-emerald-500'}`}></span>
+                       <span>Latency: {activeModel === ModelType.GEMINI ? '420ms' : '32ms'}</span>
                     </span>
-                </div>
-                <div className="flex items-center space-x-4">
-                    <span className={`w-2 h-2 rounded-full ${activeModel === ModelType.GEMINI ? 'bg-indigo-500 animate-pulse' : 'bg-emerald-500'}`}></span>
-                    <span>Latency: {activeModel === ModelType.GEMINI ? '420ms' : '32ms'}</span>
                 </div>
             </div>
 
@@ -303,8 +373,11 @@ export default function App() {
                 imageUrl={imageSrc} 
                 annotations={annotations}
                 concepts={concepts}
+                selectedTool={selectedTool}
+                activeConceptId={activeConceptId}
                 onVerify={verifyMask}
                 onReject={rejectMask}
+                onAddAnnotation={handleAddManualAnnotation}
                 showSpatialOverlay={showSpatialOverlay}
             />
             

@@ -1,7 +1,7 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Annotation, Concept } from '../types';
-import { Box, ArrowRightLeft, ScanEye, Layers } from 'lucide-react';
+import { Box, ArrowRightLeft, ScanEye, Layers, Search } from 'lucide-react';
 
 interface SpatialAnalysisPanelProps {
   annotations: Annotation[];
@@ -14,6 +14,8 @@ export const SpatialAnalysisPanel: React.FC<SpatialAnalysisPanelProps> = ({
   concepts,
   isVisible
 }) => {
+  const [searchTerm, setSearchTerm] = useState('');
+
   if (!isVisible) return null;
 
   // Group by depth layer to show scene composition
@@ -21,6 +23,11 @@ export const SpatialAnalysisPanel: React.FC<SpatialAnalysisPanelProps> = ({
 
   const getConceptName = (id: string) => concepts.find(c => c.id === id)?.name || id;
   const getConceptColor = (id: string) => concepts.find(c => c.id === id)?.color || '#666';
+
+  // Filter annotations based on search term in spatialContext
+  const filteredAnnotations = annotations.filter(ann => 
+    !searchTerm || (ann.spatialContext && ann.spatialContext.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
 
   return (
     <div className="w-80 bg-zinc-900 border-l border-zinc-800 flex flex-col h-full">
@@ -30,6 +37,20 @@ export const SpatialAnalysisPanel: React.FC<SpatialAnalysisPanelProps> = ({
           Spatial Intelligence
         </h2>
         <p className="text-xs text-zinc-500 mt-1">Gemini 3 Scene Understanding</p>
+        
+        {/* Search Bar */}
+        <div className="mt-3 relative group">
+           <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none">
+              <Search size={12} className="text-zinc-500 group-focus-within:text-indigo-400 transition-colors" />
+           </div>
+           <input 
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Filter by spatial context..."
+              className="w-full bg-black border border-zinc-800 rounded text-xs py-1.5 pl-8 pr-2 text-zinc-300 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 placeholder-zinc-600 transition-all"
+           />
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-6">
@@ -42,8 +63,12 @@ export const SpatialAnalysisPanel: React.FC<SpatialAnalysisPanelProps> = ({
            <div className="space-y-1 relative">
               <div className="absolute left-3 top-0 bottom-0 w-px bg-gradient-to-b from-zinc-700 to-zinc-900" />
               
+              {filteredAnnotations.length === 0 && searchTerm && (
+                  <div className="pl-6 text-xs text-zinc-600 italic">No matches found.</div>
+              )}
+
               {depthLayers.map(layer => {
-                 const layerAnns = annotations.filter(a => (a.depthLayer ?? 5) === layer);
+                 const layerAnns = filteredAnnotations.filter(a => (a.depthLayer ?? 5) === layer);
                  if (layerAnns.length === 0) return null;
 
                  return (
@@ -78,11 +103,13 @@ export const SpatialAnalysisPanel: React.FC<SpatialAnalysisPanelProps> = ({
               <ArrowRightLeft size={12} className="mr-1.5" /> Spatial Relations
            </h3>
            <div className="bg-zinc-950 rounded-lg p-3 border border-zinc-800 space-y-3">
-              {annotations.length < 2 ? (
-                 <div className="text-center text-zinc-600 text-xs py-2">Add more objects to analyze relationships.</div>
+              {filteredAnnotations.length < 1 ? (
+                 <div className="text-center text-zinc-600 text-xs py-2">
+                     {searchTerm ? 'No relations matching filter.' : 'Add objects to analyze relationships.'}
+                 </div>
               ) : (
-                 annotations.slice(0, 5).map((ann, idx) => (
-                    <div key={`rel-${idx}`} className="text-xs text-zinc-400 border-b border-zinc-800/50 last:border-0 pb-2 last:pb-0">
+                 filteredAnnotations.slice(0, 10).map((ann, idx) => (
+                    <div key={`rel-${ann.id || idx}`} className="text-xs text-zinc-400 border-b border-zinc-800/50 last:border-0 pb-2 last:pb-0">
                        <span className="text-zinc-200 font-medium">{getConceptName(ann.conceptId)}</span>
                        <span className="mx-1 text-indigo-400">is positioned</span>
                        <span className="italic">"{ann.spatialContext}"</span>

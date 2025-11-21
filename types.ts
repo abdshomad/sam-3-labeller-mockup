@@ -4,6 +4,8 @@ export enum ModelType {
   GEMINI = 'Gemini 3 Pro (Spatial)'
 }
 
+export type ToolType = 'select' | 'box' | 'polygon' | 'point';
+
 export interface BoundingBox {
   ymin: number;
   xmin: number;
@@ -11,10 +13,17 @@ export interface BoundingBox {
   xmax: number;
 }
 
+export interface Point {
+  x: number;
+  y: number;
+}
+
 export interface Annotation {
   id: string;
   conceptId: string;
   box: BoundingBox;
+  type?: ToolType; // Defaults to 'box' if undefined
+  points?: Point[]; // For polygons and points
   confidence: number; // 0 to 1
   isVerified: boolean;
   isMasklet: boolean; // Visualization style (solid vs outline)

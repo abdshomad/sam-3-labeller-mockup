@@ -1,15 +1,20 @@
+
 import React from 'react';
 import { Concept } from '../types';
 import { Eye, EyeOff, Trash2, CheckCircle, AlertTriangle } from 'lucide-react';
 
 interface ConceptLedgerProps {
   concepts: Concept[];
+  activeConceptId: string | null;
+  onSelectConcept: (id: string) => void;
   onToggleVisibility: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
 export const ConceptLedger: React.FC<ConceptLedgerProps> = ({
   concepts,
+  activeConceptId,
+  onSelectConcept,
   onToggleVisibility,
   onDelete
 }) => {
@@ -17,7 +22,7 @@ export const ConceptLedger: React.FC<ConceptLedgerProps> = ({
     <div className="w-80 bg-zinc-900 border-r border-zinc-800 flex flex-col h-full">
       <div className="p-4 border-b border-zinc-800">
         <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Concept Ledger</h2>
-        <p className="text-xs text-zinc-500 mt-1">PCS Active</p>
+        <p className="text-xs text-zinc-500 mt-1">Select a concept to label</p>
       </div>
 
       <div className="flex-1 overflow-y-auto p-2 space-y-2">
@@ -30,7 +35,12 @@ export const ConceptLedger: React.FC<ConceptLedgerProps> = ({
         {concepts.map((concept) => (
           <div 
             key={concept.id} 
-            className="bg-zinc-850 rounded-lg p-3 border border-zinc-800 hover:border-zinc-700 transition-colors group"
+            onClick={() => onSelectConcept(concept.id)}
+            className={`rounded-lg p-3 border transition-all cursor-pointer group ${
+              activeConceptId === concept.id 
+                ? 'bg-zinc-800 border-indigo-500 shadow-md shadow-indigo-900/20' 
+                : 'bg-zinc-850 border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800'
+            }`}
           >
             {/* Header: Name and Controls */}
             <div className="flex items-center justify-between mb-2">
@@ -39,17 +49,19 @@ export const ConceptLedger: React.FC<ConceptLedgerProps> = ({
                   className="w-3 h-3 rounded-full shadow-[0_0_8px]" 
                   style={{ backgroundColor: concept.color, boxShadow: `0 0 8px ${concept.color}` }} 
                 />
-                <span className="font-medium text-zinc-200">{concept.name}</span>
+                <span className={`font-medium ${activeConceptId === concept.id ? 'text-white' : 'text-zinc-200'}`}>
+                  {concept.name}
+                </span>
               </div>
               <div className="flex items-center space-x-1 opacity-50 group-hover:opacity-100 transition-opacity">
                 <button 
-                  onClick={() => onToggleVisibility(concept.id)}
+                  onClick={(e) => { e.stopPropagation(); onToggleVisibility(concept.id); }}
                   className="p-1 hover:bg-zinc-700 rounded text-zinc-400"
                 >
                   {concept.isVisible ? <Eye size={14} /> : <EyeOff size={14} />}
                 </button>
                 <button 
-                  onClick={() => onDelete(concept.id)}
+                  onClick={(e) => { e.stopPropagation(); onDelete(concept.id); }}
                   className="p-1 hover:bg-red-900/30 rounded text-zinc-400 hover:text-red-400"
                 >
                   <Trash2 size={14} />
