@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Settings, Bell, User, Cpu, Layers, Wand2 } from 'lucide-react';
+
+import React, { useState, useEffect, useRef } from 'react';
+import { Search, Bell, Wand2, Layers, Cpu, Cuboid, PanelRightOpen, PanelRightClose, Upload, Image as ImageIcon } from 'lucide-react';
 import { ConceptLedger } from './components/ConceptLedger';
 import { SemanticCanvas } from './components/SemanticCanvas';
 import { Timeline } from './components/Timeline';
+import { SpatialAnalysisPanel } from './components/SpatialAnalysisPanel';
 import { Annotation, Concept, ModelType } from './types';
 import { detectObjects, mockSAM3Detect } from './services/geminiService';
 
@@ -15,23 +17,31 @@ const getBase64FromUrl = async (url: string): Promise<string> => {
     reader.readAsDataURL(blob);
     reader.onloadend = () => {
         const base64data = reader.result as string;
-        // Remove the data URL prefix
-        resolve(base64data.split(',')[1]);
+        // Handle potential prefix if present, though split is usually safer on usage site
+        resolve(base64data);
     }
     reader.onerror = reject;
   });
 };
 
-const COLORS = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#3b82f6'];
-const DEMO_IMAGE = "https://images.unsplash.com/photo-1566228000166-58d23131593d?q=80&w=2070&auto=format&fit=crop"; // Traffic scene
+const COLORS = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#8b5cf6', '#14b8a6'];
+const DEMO_IMAGE = "https://images.unsplash.com/photo-1566228000166-58d23131593d?q=80&w=2070&auto=format&fit=crop"; 
 
 export default function App() {
   const [activeModel, setActiveModel] = useState<ModelType>(ModelType.SAM3);
+  const [imageSrc, setImageSrc] = useState<string>(DEMO_IMAGE);
   const [inputValue, setInputValue] = useState('');
   const [concepts, setConcepts] = useState<Concept[]>([]);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   
+  // UI State
+  const [showSpatialPanel, setShowSpatialPanel] = useState(false);
+  const [showSpatialOverlay, setShowSpatialOverlay] = useState(false);
+
+  // File Input
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Playback state
   const [currentTime, setCurrentTime] = useState(20);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -46,6 +56,35 @@ export default function App() {
       return () => clearInterval(interval);
   }, [isPlaying]);
 
+  // Auto-switch visuals when model changes
+  useEffect(() => {
+      if (activeModel === ModelType.GEMINI) {
+          setShowSpatialPanel(true);
+          setShowSpatialOverlay(true);
+      } else {
+          setShowSpatialPanel(false);
+          setShowSpatialOverlay(false);
+      }
+  }, [activeModel]);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        if (event.target?.result) {
+            setImageSrc(event.target.result as string);
+            // Reset state for new image
+            setAnnotations([]);
+            setConcepts([]);
+            // Auto-switch to Gemini for real analysis since Mock SAM won't work on custom images
+            setActiveModel(ModelType.GEMINI);
+        }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleConceptSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputValue.trim()) return;
@@ -53,7 +92,6 @@ export default function App() {
     const newConceptName = inputValue.trim();
     const newConceptId = newConceptName.toLowerCase().replace(/\s+/g, '-');
 
-    // Check duplicates
     if (concepts.find(c => c.id === newConceptId)) {
         setInputValue('');
         return;
@@ -61,37 +99,43 @@ export default function App() {
 
     setIsProcessing(true);
 
-    // 1. Create Concept
     const newConcept: Concept = {
         id: newConceptId,
         name: newConceptName,
         color: COLORS[concepts.length % COLORS.length],
-        presenceScore: 0.92, // Placeholder initial score
+        presenceScore: 0.92,
         instanceCount: 0,
         isVisible: true
     };
 
-    // 2. Fetch Annotations
     let newAnnotations: Annotation[] = [];
     
     if (activeModel === ModelType.GEMINI) {
-        const base64 = await getBase64FromUrl(DEMO_IMAGE);
-        const detected = await detectObjects(process.env.API_KEY || '', base64, newConceptName);
-        
-        // Remap IDs to match our concept system
-        newAnnotations = detected.map(a => ({
-            ...a,
-            conceptId: newConceptId
-        }));
+        try {
+            let base64 = '';
+            if (imageSrc.startsWith('data:')) {
+                base64 = imageSrc.split(',')[1];
+            } else {
+                const fullBase64 = await getBase64FromUrl(imageSrc);
+                base64 = fullBase64.split(',')[1] || fullBase64;
+            }
+            
+            const detected = await detectObjects(process.env.API_KEY || '', base64, newConceptName);
+            
+            newAnnotations = detected.map(a => ({
+                ...a,
+                conceptId: newConceptId
+            }));
+        } catch (error) {
+            console.error("Analysis failed", error);
+        }
     } else {
-        // SAM 3 Mock
-        await new Promise(r => setTimeout(r, 800)); // Simulate inference time
+        // Mock delay
+        await new Promise(r => setTimeout(r, 800)); 
         newAnnotations = mockSAM3Detect(newConceptId);
     }
 
-    // 3. Update State
     newConcept.instanceCount = newAnnotations.length;
-    // Calculate average confidence for presence score
     if (newAnnotations.length > 0) {
         const avgConf = newAnnotations.reduce((sum, a) => sum + a.confidence, 0) / newAnnotations.length;
         newConcept.presenceScore = avgConf;
@@ -121,7 +165,6 @@ export default function App() {
   const rejectMask = (id: string) => {
     setAnnotations(prev => prev.filter(a => a.id !== id));
     setConcepts(prev => prev.map(c => {
-        // Update instance count
         const remaining = annotations.filter(a => a.conceptId === c.id && a.id !== id).length;
         return c.id === annotations.find(a => a.id === id)?.conceptId ? { ...c, instanceCount: remaining } : c;
     }));
@@ -133,28 +176,44 @@ export default function App() {
       <header className="h-14 border-b border-zinc-800 bg-zinc-900 flex items-center justify-between px-4 shrink-0 z-50">
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center font-bold text-white">
+            <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/20">
               S3
             </div>
             <span className="font-bold text-lg tracking-tight">SAM 3 <span className="text-zinc-500 font-normal">Labeller</span></span>
           </div>
           
           {/* Model Selector */}
-          <div className="ml-8 flex items-center bg-zinc-950 rounded-lg p-1 border border-zinc-800">
+          <div className="ml-8 flex items-center bg-black rounded-lg p-1 border border-zinc-800">
             <button 
                onClick={() => setActiveModel(ModelType.SAM3)}
-               className={`px-3 py-1 rounded text-xs font-medium transition-all ${activeModel === ModelType.SAM3 ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
+               className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${activeModel === ModelType.SAM3 ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
             >
                SAM 3 Native
             </button>
             <button 
                onClick={() => setActiveModel(ModelType.GEMINI)}
-               className={`px-3 py-1 rounded text-xs font-medium transition-all flex items-center space-x-1 ${activeModel === ModelType.GEMINI ? 'bg-zinc-800 text-indigo-400 shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
+               className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center space-x-1.5 ${activeModel === ModelType.GEMINI ? 'bg-indigo-900/30 text-indigo-300 shadow-sm ring-1 ring-indigo-500/20' : 'text-zinc-500 hover:text-zinc-300'}`}
             >
-               <span>Gemini 2.5</span>
-               <span className="block w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
+               <Wand2 size={12} />
+               <span>Gemini 3 Spatial</span>
             </button>
           </div>
+
+          {/* Image Upload */}
+          <input 
+            type="file" 
+            ref={fileInputRef}
+            className="hidden"
+            accept="image/*"
+            onChange={handleFileUpload}
+          />
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 transition-colors"
+          >
+            <Upload size={14} />
+            <span>Upload Image</span>
+          </button>
         </div>
 
         {/* Concept Command Bar */}
@@ -171,52 +230,82 @@ export default function App() {
                 type="text" 
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                placeholder="Describe a concept to label (e.g., 'red car', 'worker in vest')..." 
-                className="w-full bg-zinc-950 border border-zinc-700 rounded-lg pl-10 pr-4 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all shadow-inner"
+                placeholder={activeModel === ModelType.GEMINI ? "Ask Gemini to find objects with spatial context..." : "Describe a concept to label..."}
+                className="w-full bg-black border border-zinc-800 rounded-lg pl-10 pr-4 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all shadow-inner"
              />
              <div className="absolute inset-y-0 right-2 flex items-center pointer-events-none">
-                <span className="text-[10px] bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded border border-zinc-700">ENTER</span>
+                <span className="text-[10px] bg-zinc-900 text-zinc-500 px-1.5 py-0.5 rounded border border-zinc-800">ENTER</span>
              </div>
           </form>
         </div>
 
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-4">
+           {/* Spatial Toggles */}
+           <div className="flex items-center border-r border-zinc-800 pr-4 space-x-1">
+              <button 
+                onClick={() => setShowSpatialOverlay(!showSpatialOverlay)}
+                title="Toggle Spatial Overlay"
+                className={`p-2 rounded-lg transition-colors ${showSpatialOverlay ? 'bg-indigo-500/20 text-indigo-400' : 'text-zinc-500 hover:bg-zinc-800'}`}
+              >
+                <Cuboid size={18} />
+              </button>
+              <button 
+                onClick={() => setShowSpatialPanel(!showSpatialPanel)}
+                title="Toggle Intelligence Panel"
+                className={`p-2 rounded-lg transition-colors ${showSpatialPanel ? 'bg-indigo-500/20 text-indigo-400' : 'text-zinc-500 hover:bg-zinc-800'}`}
+              >
+                {showSpatialPanel ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+              </button>
+           </div>
+
            <button className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg relative">
               <Bell size={18} />
-              <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-zinc-900"></span>
+              <span className="absolute top-2 right-2 w-2 h-2 bg-indigo-500 rounded-full border-2 border-zinc-900"></span>
            </button>
-           <div className="h-8 w-8 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 flex items-center justify-center text-xs font-bold">
+           <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 flex items-center justify-center text-xs font-bold border border-white/10 shadow-inner">
               JD
            </div>
         </div>
       </header>
 
       {/* Main Content Grid */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
          <ConceptLedger 
             concepts={concepts} 
             onToggleVisibility={toggleVisibility}
             onDelete={deleteConcept}
          />
          
-         <div className="flex-1 flex flex-col min-w-0">
+         <div className="flex-1 flex flex-col min-w-0 bg-black/20">
             {/* Top Toolbar for Canvas */}
-            <div className="h-10 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between px-4 text-xs text-zinc-400">
-                <div className="flex items-center space-x-4">
-                    <span className="flex items-center hover:text-zinc-200 cursor-pointer"><Layers size={14} className="mr-1.5"/> Layers</span>
-                    <span className="flex items-center hover:text-zinc-200 cursor-pointer"><Cpu size={14} className="mr-1.5"/> {activeModel === ModelType.SAM3 ? 'H100 Cluster' : 'Google TPUv5'}</span>
+            <div className="h-10 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between px-4 text-xs text-zinc-400 select-none">
+                <div className="flex items-center space-x-6">
+                    <span className="flex items-center hover:text-zinc-200 cursor-pointer transition-colors">
+                        <Layers size={14} className="mr-2 text-zinc-500"/> 
+                        {annotations.length} Masks
+                    </span>
+                    <span className="flex items-center hover:text-zinc-200 cursor-pointer transition-colors">
+                        <Cpu size={14} className="mr-2 text-zinc-500"/> 
+                        {activeModel === ModelType.SAM3 ? 'H100 Cluster (Inference)' : 'Gemini 3 Pro (Reasoning)'}
+                    </span>
+                    <span className="flex items-center">
+                        <ImageIcon size={14} className="mr-2 text-zinc-500" />
+                        {imageSrc === DEMO_IMAGE ? "Demo Image" : "Custom Upload"}
+                    </span>
                 </div>
-                <div>
+                <div className="flex items-center space-x-4">
+                    <span className={`w-2 h-2 rounded-full ${activeModel === ModelType.GEMINI ? 'bg-indigo-500 animate-pulse' : 'bg-emerald-500'}`}></span>
                     <span>Latency: {activeModel === ModelType.GEMINI ? '420ms' : '32ms'}</span>
                 </div>
             </div>
 
             <SemanticCanvas 
-                imageUrl={DEMO_IMAGE} 
+                imageUrl={imageSrc} 
                 annotations={annotations}
                 concepts={concepts}
                 onVerify={verifyMask}
                 onReject={rejectMask}
+                showSpatialOverlay={showSpatialOverlay}
             />
             
             <Timeline 
@@ -228,6 +317,15 @@ export default function App() {
                 onPlayPause={() => setIsPlaying(!isPlaying)}
                 onSeek={setCurrentTime}
             />
+         </div>
+
+         {/* Right Sidebar for Spatial Intelligence */}
+         <div className={`transition-all duration-300 ease-in-out border-l border-zinc-800 ${showSpatialPanel ? 'w-80 translate-x-0' : 'w-0 translate-x-full opacity-0 overflow-hidden'}`}>
+             <SpatialAnalysisPanel 
+                annotations={annotations} 
+                concepts={concepts}
+                isVisible={showSpatialPanel}
+             />
          </div>
       </div>
     </div>

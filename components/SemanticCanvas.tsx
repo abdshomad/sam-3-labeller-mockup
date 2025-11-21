@@ -1,6 +1,7 @@
-import React, { useRef, useEffect, useState } from 'react';
+
+import React, { useState } from 'react';
 import { Annotation, Concept } from '../types';
-import { Maximize2, Check, X } from 'lucide-react';
+import { Maximize2, Check, X, Move3d, Eye } from 'lucide-react';
 
 interface SemanticCanvasProps {
   imageUrl: string;
@@ -8,6 +9,7 @@ interface SemanticCanvasProps {
   concepts: Concept[];
   onVerify: (id: string) => void;
   onReject: (id: string) => void;
+  showSpatialOverlay: boolean;
 }
 
 export const SemanticCanvas: React.FC<SemanticCanvasProps> = ({
@@ -15,7 +17,8 @@ export const SemanticCanvas: React.FC<SemanticCanvasProps> = ({
   annotations,
   concepts,
   onVerify,
-  onReject
+  onReject,
+  showSpatialOverlay
 }) => {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   
@@ -46,14 +49,25 @@ export const SemanticCanvas: React.FC<SemanticCanvasProps> = ({
                     const concept = getConcept(ann.conceptId);
                     if (!concept || !concept.isVisible) return null;
                     
-                    // Determine style based on verification status
                     const isHovered = hoveredId === ann.id;
                     const strokeColor = concept.color;
-                    const fillColor = `${concept.color}33`; // 20% opacity hex
-                    
+                    const fillColor = `${concept.color}33`; 
+
                     return (
                         <g key={ann.id}>
-                            {/* The "Masklet" representation - here approximated as a box for Web compatibility */}
+                            {/* Depth Shadow (Pseudo-3D) */}
+                            {showSpatialOverlay && ann.depthLayer !== undefined && (
+                              <rect
+                                x={`${ann.box.xmin * 100 + (10 - ann.depthLayer) * 0.2}%`}
+                                y={`${ann.box.ymin * 100 + (10 - ann.depthLayer) * 0.2}%`}
+                                width={`${(ann.box.xmax - ann.box.xmin) * 100}%`}
+                                height={`${(ann.box.ymax - ann.box.ymin) * 100}%`}
+                                fill="black"
+                                fillOpacity={0.3}
+                                rx="2"
+                              />
+                            )}
+
                             <rect
                                 x={`${ann.box.xmin * 100}%`}
                                 y={`${ann.box.ymin * 100}%`}
@@ -65,7 +79,20 @@ export const SemanticCanvas: React.FC<SemanticCanvasProps> = ({
                                 strokeDasharray={ann.isVerified ? '0' : '4 2'}
                                 className="transition-all duration-200 ease-out"
                             />
-                            {/* Hover Effect Fill */}
+                            
+                            {/* Spatial Info Connector Line */}
+                            {showSpatialOverlay && (
+                                <line 
+                                    x1={`${(ann.box.xmax) * 100}%`}
+                                    y1={`${(ann.box.ymin) * 100}%`}
+                                    x2={`${(ann.box.xmax) * 100 + 5}%`}
+                                    y2={`${(ann.box.ymin) * 100 - 5}%`}
+                                    stroke={strokeColor}
+                                    strokeWidth="1"
+                                    opacity={0.6}
+                                />
+                            )}
+
                             {isHovered && (
                                 <rect
                                     x={`${ann.box.xmin * 100}%`}
@@ -100,9 +127,9 @@ export const SemanticCanvas: React.FC<SemanticCanvasProps> = ({
                             onMouseEnter={() => setHoveredId(ann.id)}
                             onMouseLeave={() => setHoveredId(null)}
                         >
-                            {/* Tooltip only on hover */}
-                            {hoveredId === ann.id && (
-                                <div className="absolute -top-10 left-0 bg-zinc-900 text-xs text-white px-2 py-1 rounded border border-zinc-700 shadow-xl flex items-center space-x-2 whitespace-nowrap z-50">
+                            {/* Standard Tooltip */}
+                            {hoveredId === ann.id && !showSpatialOverlay && (
+                                <div className="absolute -top-10 left-0 bg-zinc-900/90 backdrop-blur text-xs text-white px-2 py-1 rounded border border-zinc-700 shadow-xl flex items-center space-x-2 whitespace-nowrap z-50">
                                     <div className="w-2 h-2 rounded-full" style={{ backgroundColor: concept.color }} />
                                     <span className="font-semibold">{concept.name}</span>
                                     <span className={`font-mono ${ann.confidence < 0.8 ? 'text-yellow-400' : 'text-zinc-400'}`}>
@@ -110,22 +137,28 @@ export const SemanticCanvas: React.FC<SemanticCanvasProps> = ({
                                     </span>
                                     {!ann.isVerified && (
                                         <div className="flex items-center ml-2 space-x-1 border-l border-zinc-700 pl-2">
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); onVerify(ann.id); }}
-                                                className="p-1 hover:bg-emerald-500/20 text-emerald-400 rounded"
-                                                title="Verify Mask"
-                                            >
-                                                <Check size={12} />
-                                            </button>
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); onReject(ann.id); }}
-                                                className="p-1 hover:bg-red-500/20 text-red-400 rounded"
-                                                title="Reject Mask"
-                                            >
-                                                <X size={12} />
-                                            </button>
+                                            <button onClick={(e) => { e.stopPropagation(); onVerify(ann.id); }} className="p-1 hover:bg-emerald-500/20 text-emerald-400 rounded"><Check size={12} /></button>
+                                            <button onClick={(e) => { e.stopPropagation(); onReject(ann.id); }} className="p-1 hover:bg-red-500/20 text-red-400 rounded"><X size={12} /></button>
                                         </div>
                                     )}
+                                </div>
+                            )}
+
+                            {/* Spatial Annotation Tag (Always visible if overlay on) */}
+                            {showSpatialOverlay && (
+                                <div 
+                                    className="absolute -top-8 -right-24 w-24 transform translate-x-full"
+                                    style={{ pointerEvents: 'none' }}
+                                >
+                                    <div className="bg-indigo-900/80 backdrop-blur border border-indigo-500/50 text-[10px] p-1.5 rounded text-indigo-100 shadow-lg">
+                                        <div className="flex items-center space-x-1 mb-1 font-bold text-indigo-300 border-b border-indigo-500/30 pb-0.5">
+                                            <Move3d size={10} />
+                                            <span>Depth: {ann.depthLayer}/10</span>
+                                        </div>
+                                        <div className="leading-tight opacity-90">
+                                            {ann.spatialContext}
+                                        </div>
+                                    </div>
                                 </div>
                             )}
                         </div>

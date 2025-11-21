@@ -1,6 +1,7 @@
+
 export enum ModelType {
   SAM3 = 'Meta SAM 3 (Mock)',
-  GEMINI = 'Gemini 2.5 Flash (Live)'
+  GEMINI = 'Gemini 3 Pro (Spatial)'
 }
 
 export interface BoundingBox {
@@ -19,6 +20,11 @@ export interface Annotation {
   isMasklet: boolean; // Visualization style (solid vs outline)
   frameStart?: number;
   frameEnd?: number;
+  
+  // New Spatial Understanding Fields
+  spatialContext?: string; // e.g., "Next to the red sedan"
+  depthLayer?: number; // 0 (background) to 10 (foreground)
+  orientation?: string; // e.g., "Facing left"
 }
 
 export interface Concept {
